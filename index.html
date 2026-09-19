@@ -298,6 +298,8 @@ footer{text-align:center;font-size:.85rem;padding:0 20px 40px;opacity:.85}
 /* ================= 設定：價格、材料、配方（可自行修改） ================= */
 const PRICE_BOX_PIECE = 50;   // 禮盒每顆
 const PRICE_SNOW_BAG  = 120;  // 雪Q餅每袋
+const DISCOUNT_MIN    = 3000; // 訂單滿此金額打折
+const DISCOUNT_RATE   = 0.95; // 95 折
 const BAGS_PER_TRAY   = 4;    // 一盤 = 同口味 4 袋
 
 // pack = 每包裝克數；pu = 包裝單位；count = 直接以「顆」計算
@@ -380,7 +382,9 @@ let selected=new Set();
 /* ================= 品項 / 計算 ================= */
 const itemTotal=it=>it.qty*it.unit;
 const unitOf=it=>it.type==='box'?'盒':it.type==='piece'?'顆':'袋';
-const orderTotal=o=>o.items.reduce((s,i)=>s+itemTotal(i),0);
+const subtotal=items=>items.reduce((s,i)=>s+itemTotal(i),0);
+const discounted=items=>{const t=subtotal(items);return t>=DISCOUNT_MIN?Math.round(t*DISCOUNT_RATE):t};
+const orderTotal=o=>discounted(o.items);
 function itemName(it){
   if(it.type==='piece')return FLAVORS.find(f=>f.k===it.flavor).name+'（單顆）';
   if(it.type==='snow')return SNOW.find(s=>s.k===it.flavor).name;
@@ -533,13 +537,23 @@ $('#addSnow').onclick=()=>{
   renderDraft();toast('已加入品項');
 };
 
+function totalRows(items){
+  const sub=subtotal(items),tot=discounted(items);
+  if(sub>=DISCOUNT_MIN)
+    return `<tr><td colspan="3" style="font-weight:500">小計</td><td class="n" style="font-weight:500">${money(sub)}</td><td></td></tr>
+      <tr><td colspan="3" style="font-weight:500">滿 ${money(DISCOUNT_MIN)} 打 95 折</td><td class="n" style="font-weight:500">-${money(sub-tot)}</td><td></td></tr>
+      <tr><td colspan="3">訂單總價</td><td class="n">${money(tot)}</td><td></td></tr>`;
+  const gap=DISCOUNT_MIN-sub;
+  return `<tr><td colspan="3">訂單總價</td><td class="n">${money(sub)}</td><td></td></tr>`
+    +(sub>0?`<tr><td colspan="5" style="font-weight:500;font-size:.88rem">再 ${money(gap)} 即享 95 折</td></tr>`:'');
+}
 function renderDraft(){
   const box=$('#draftItems');
   if(!draft.length){box.innerHTML='<p class="empty">尚未加入品項。</p>';}
   else{
     box.innerHTML='<table><thead><tr><th>品名</th><th class="n">數量</th><th class="n">單價</th><th class="n">總價</th><th></th></tr></thead><tbody>'
       +draft.map((it,i)=>`<tr><td>${esc(itemName(it))}<small>${esc(itemDetail(it))}</small></td><td class="n">${it.qty} ${unitOf(it)}</td><td class="n">${money(it.unit)}</td><td class="n">${money(itemTotal(it))}</td><td class="n"><button class="btn danger sm" type="button" data-rm="${i}" aria-label="移除 ${esc(itemName(it))}">移除</button></td></tr>`).join('')
-      +`</tbody><tfoot><tr><td colspan="3">訂單總價</td><td class="n">${money(draft.reduce((s,i)=>s+itemTotal(i),0))}</td><td></td></tr></tfoot></table>`;
+      +`</tbody><tfoot>${totalRows(draft)}</tfoot></table>`;
   }
   $('#draftMat').innerHTML=matHTML(draft);
 }
@@ -598,7 +612,7 @@ function renderList(){
         <details><summary>此單所需材料</summary><div class="mat">${matHTML(o.items)}</div></details>
       </div>
       <div class="o-side">
-        <div class="o-total">${money(orderTotal(o))}</div>
+        <div class="o-total">${money(orderTotal(o))}${subtotal(o.items)>=DISCOUNT_MIN?`<small style="display:block;font-size:.8rem;font-weight:500">原價 ${money(subtotal(o.items))}，95 折</small>`:''}</div>
         <div><button class="btn ghost sm" type="button" data-edit="${esc(o.id)}">編輯</button> <button class="btn danger sm" type="button" data-del="${esc(o.id)}">刪除</button></div>
       </div>
     </article>`).join('');
@@ -662,9 +676,9 @@ $('#impFile').onchange=async e=>{
 };
 $('#expCsv').onclick=()=>{
   const cell=v=>{let s=String(v??'');if(/^[=+\-@\t\r]/.test(s))s="'"+s;return `"${s.replace(/"/g,'""')}"`};
-  const rows=[['送出日期','訂購人','電話','品名','內容','數量','單位','單價','總價','備註']];
-  for(const o of filtered())for(const it of o.items)
-    rows.push([o.date,o.name,o.phone,itemName(it),itemDetail(it),it.qty,unitOf(it),it.unit,itemTotal(it),o.note]);
+  const rows=[['送出日期','訂購人','電話','品名','內容','數量','單位','單價','總價','備註','訂單實收(折扣後)']];
+  for(const o of filtered())o.items.forEach((it,i)=>
+    rows.push([o.date,o.name,o.phone,itemName(it),itemDetail(it),it.qty,unitOf(it),it.unit,itemTotal(it),o.note,i===0?orderTotal(o):'']));
   download(`orders-${today()}.csv`,'\ufeff'+rows.map(r=>r.map(cell).join(',')).join('\r\n'),'text/csv;charset=utf-8');
 };
 
